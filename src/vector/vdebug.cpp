@@ -35,6 +35,15 @@
 #include <thread>
 #include <tuple>
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#elif !defined(_WIN32)
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
+
 namespace {
 
 /* Returns microseconds since epoch */
@@ -605,6 +614,38 @@ private:
     unsigned int                         m_read_index;
 };
 
+#ifdef __ANDROID__
+
+/* On Android there is no writable temp directory available to a library, and
+ * every app already has a per-process log sink. Writing to logcat keeps the
+ * log out of any shared, world writable location. */
+class LogcatWriter {
+public:
+    LogcatWriter(std::string const& /*log_directory*/,
+                 std::string const& log_file_name,
+                 uint32_t /*log_file_roll_size_mb*/)
+        : m_tag(log_file_name.empty() ? "rlottie" : log_file_name)
+    {
+    }
+
+    void write(VDebug& logline)
+    {
+        std::ostringstream os;
+        logline.stringify(os);
+        std::string line = os.str();
+        while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
+            line.pop_back();
+        __android_log_write(ANDROID_LOG_INFO, m_tag.c_str(), line.c_str());
+    }
+
+private:
+    std::string const m_tag;
+};
+
+using LogWriter = LogcatWriter;
+
+#else
+
 class FileWriter {
 public:
     FileWriter(std::string const& log_directory,
@@ -617,6 +658,8 @@ public:
 
     void write(VDebug& logline)
     {
+        if (!m_os) return;
+
         auto pos = m_os->tellp();
         logline.stringify(*m_os);
         m_bytes_written += m_os->tellp() - pos;
@@ -626,21 +669,50 @@ public:
     }
 
 private:
+    /* The log directory may be world writable, so never write through a name
+     * an attacker could have pre-created: create the file ourselves, failing
+     * on anything that already exists or is a symlink, and move on to the next
+     * file number when that happens. */
+    bool create_file(std::string const& name)
+    {
+#ifdef _WIN32
+        m_os = std::make_unique<std::ofstream>();
+        m_os->open(name, std::ofstream::out | std::ofstream::trunc);
+#else
+        int fd = ::open(name.c_str(),
+                        O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
+                        S_IRUSR | S_IWUSR);
+        if (fd < 0) return false;
+        ::close(fd);
+
+        m_os = std::make_unique<std::ofstream>();
+        m_os->open(name, std::ofstream::out | std::ofstream::trunc);
+#endif
+        if (m_os->is_open()) return true;
+
+        m_os.reset();
+        return false;
+    }
+
     void roll_file()
     {
         if (m_os) {
             m_os->flush();
             m_os->close();
+            m_os.reset();
         }
 
         m_bytes_written = 0;
-        m_os = std::make_unique<std::ofstream>();
-        // TODO Optimize this part. Does it even matter ?
-        std::string log_file_name = m_name;
-        log_file_name.append(".");
-        log_file_name.append(std::to_string(++m_file_number));
-        log_file_name.append(".txt");
-        m_os->open(log_file_name, std::ofstream::out | std::ofstream::trunc);
+
+        for (uint32_t attempt = 0; attempt < 100; attempt++) {
+            std::string log_file_name = m_name;
+            log_file_name.append(".");
+            log_file_name.append(std::to_string(++m_file_number));
+            log_file_name.append(".txt");
+            if (create_file(log_file_name)) return;
+        }
+        /* Give up rather than log through a name we do not control. write()
+         * discards log lines while m_os is null. */
     }
 
 private:
@@ -650,6 +722,10 @@ private:
     std::string const              m_name;
     std::unique_ptr<std::ofstream> m_os;
 };
+
+using LogWriter = FileWriter;
+
+#endif
 
 class NanoLogger {
 public:
@@ -711,7 +787,7 @@ private:
 
     std::atomic<State>          m_state;
     std::unique_ptr<BufferBase> m_buffer_base;
-    FileWriter                  m_file_writer;
+    LogWriter                   m_file_writer;
     std::thread                 m_thread;
 };
 

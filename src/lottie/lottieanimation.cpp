@@ -24,7 +24,9 @@
 #include "lottiemodel.h"
 #include "rlottie.h"
 
+#include <cstdlib>
 #include <fstream>
+#include <string>
 
 using namespace rlottie;
 using namespace rlottie::internal;
@@ -481,12 +483,33 @@ void lottie_shutdown_impl()
 }
 
 #ifdef LOTTIE_LOGGING_SUPPORT
+#if !defined(__ANDROID__)
+static std::string logDirectory()
+{
+    /* Never default to a hardcoded world writable directory: let the embedder
+     * point the log at a directory it controls. */
+    for (const char *var : {"RLOTTIE_LOG_DIR", "TMPDIR"}) {
+        const char *value = std::getenv(var);
+        if (value && *value) {
+            std::string dir(value);
+            if (dir.back() != '/') dir.push_back('/');
+            return dir;
+        }
+    }
+    return "./";
+}
+#endif
+
 void initLogging()
 {
-#if defined(__ARM_NEON__)
+#if defined(__ANDROID__)
+    /* Logs go to logcat; the directory argument is unused. */
+    initialize(GuaranteedLogger(), "", "rlottie", 1);
+    set_log_level(LogLevel::INFO);
+#elif defined(__ARM_NEON__)
     set_log_level(LogLevel::OFF);
 #else
-    initialize(GuaranteedLogger(), "/tmp/", "rlottie", 1);
+    initialize(GuaranteedLogger(), logDirectory(), "rlottie", 1);
     set_log_level(LogLevel::INFO);
 #endif
 }
