@@ -1,4 +1,4 @@
-cmake_minimum_required( VERSION 3.3 )
+cmake_minimum_required( VERSION 3.19 )
 
 #declare project
 project( rlottie VERSION 0.2 LANGUAGES C CXX ASM)
@@ -142,7 +142,6 @@ endif (NOT LIB_INSTALL_DIR)
 #declare source and include files
 add_subdirectory(inc)
 add_subdirectory(src)
-add_subdirectory(example)
 
 if (LOTTIE_TEST)
     enable_testing()
