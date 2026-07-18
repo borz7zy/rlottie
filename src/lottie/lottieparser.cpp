@@ -1043,10 +1043,12 @@ model::Color LottieParserImpl::toColor(const char *str)
     if (!str) return {};
 
     model::Color color;
-    auto         len = strlen(str);
 
     // some resource has empty color string
     // return a default color for those cases.
+    // bounded scan: only "#rrggbb" (7 chars) is accepted, so never read
+    // further than one past that length.
+    auto len = strnlen(str, 8);
     if (len != 7 || str[0] != '#') return color;
 
     char tmp[3] = {'\0', '\0', '\0'};
