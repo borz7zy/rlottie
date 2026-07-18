@@ -487,7 +487,9 @@ public:
             mPtr = nullptr;
         }
 
-        auto len = strlen(name);
+        /* bounded scan: we only need to know whether the name fits into the
+         * inline buffer, so never read further than maxShortStringLength. */
+        auto len = strnlen(name, maxShortStringLength);
         if (len < maxShortStringLength) {
             /* len + 1 <= maxShortStringLength == sizeof(mData._buffer), so the
              * terminator is copied and always fits. */
