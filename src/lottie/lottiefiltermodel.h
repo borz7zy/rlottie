@@ -26,12 +26,12 @@
 #include <algorithm>
 #include <bitset>
 #include <cassert>
+#include <variant>
 #include "lottiemodel.h"
 #include "rlottie.h"
 
 using namespace rlottie::internal;
-// Naive way to implement std::variant
-// refactor it when we move to c++17
+// Tagged union over the four property callback types.
 // users should make sure proper combination
 // of id and value are passed while creating the object.
 class LOTVariant {
@@ -42,190 +42,74 @@ public:
     using SizeFunc = std::function<rlottie::Size(const rlottie::FrameInfo&)>;
 
     LOTVariant(rlottie::Property prop, const ValueFunc& v)
-        : mPropery(prop), mTag(Value)
+        : mPropery(prop), mImpl(v)
     {
-        construct(impl.valueFunc, v);
     }
 
     LOTVariant(rlottie::Property prop, ValueFunc&& v)
-        : mPropery(prop), mTag(Value)
+        : mPropery(prop), mImpl(std::move(v))
     {
-        moveConstruct(impl.valueFunc, std::move(v));
     }
 
     LOTVariant(rlottie::Property prop, const ColorFunc& v)
-        : mPropery(prop), mTag(Color)
+        : mPropery(prop), mImpl(v)
     {
-        construct(impl.colorFunc, v);
     }
 
     LOTVariant(rlottie::Property prop, ColorFunc&& v)
-        : mPropery(prop), mTag(Color)
+        : mPropery(prop), mImpl(std::move(v))
     {
-        moveConstruct(impl.colorFunc, std::move(v));
     }
 
     LOTVariant(rlottie::Property prop, const PointFunc& v)
-        : mPropery(prop), mTag(Point)
+        : mPropery(prop), mImpl(v)
     {
-        construct(impl.pointFunc, v);
     }
 
     LOTVariant(rlottie::Property prop, PointFunc&& v)
-        : mPropery(prop), mTag(Point)
+        : mPropery(prop), mImpl(std::move(v))
     {
-        moveConstruct(impl.pointFunc, std::move(v));
     }
 
     LOTVariant(rlottie::Property prop, const SizeFunc& v)
-        : mPropery(prop), mTag(Size)
+        : mPropery(prop), mImpl(v)
     {
-        construct(impl.sizeFunc, v);
     }
 
     LOTVariant(rlottie::Property prop, SizeFunc&& v)
-        : mPropery(prop), mTag(Size)
+        : mPropery(prop), mImpl(std::move(v))
     {
-        moveConstruct(impl.sizeFunc, std::move(v));
     }
 
     rlottie::Property property() const { return mPropery; }
 
-    const ColorFunc& color() const
-    {
-        assert(mTag == Color);
-        return impl.colorFunc;
-    }
-
-    const ValueFunc& value() const
-    {
-        assert(mTag == Value);
-        return impl.valueFunc;
-    }
-
-    const PointFunc& point() const
-    {
-        assert(mTag == Point);
-        return impl.pointFunc;
-    }
-
-    const SizeFunc& size() const
-    {
-        assert(mTag == Size);
-        return impl.sizeFunc;
-    }
+    /* std::get() would throw on a type mismatch, but the library is built with
+     * -fno-exceptions; get_if() keeps the previous assert-in-debug,
+     * undefined-in-release contract. */
+    const ColorFunc& color() const { return get<ColorFunc>(); }
+    const ValueFunc& value() const { return get<ValueFunc>(); }
+    const PointFunc& point() const { return get<PointFunc>(); }
+    const SizeFunc&  size() const { return get<SizeFunc>(); }
 
     LOTVariant() = default;
-    ~LOTVariant() noexcept { Destroy(); }
-    LOTVariant(const LOTVariant& other) { Copy(other); }
-    LOTVariant(LOTVariant&& other) noexcept { Move(std::move(other)); }
-    LOTVariant& operator=(LOTVariant&& other)
-    {
-        Destroy();
-        Move(std::move(other));
-        return *this;
-    }
-    LOTVariant& operator=(const LOTVariant& other)
-    {
-        Destroy();
-        Copy(other);
-        return *this;
-    }
+    ~LOTVariant() noexcept = default;
+    LOTVariant(const LOTVariant&) = default;
+    LOTVariant(LOTVariant&&) noexcept = default;
+    LOTVariant& operator=(const LOTVariant&) = default;
+    LOTVariant& operator=(LOTVariant&&) noexcept = default;
 
 private:
     template <typename T>
-    void construct(T& member, const T& val)
+    const T& get() const
     {
-        new (&member) T(val);
+        const T* fn = std::get_if<T>(&mImpl);
+        assert(fn);
+        return *fn;
     }
 
-    template <typename T>
-    void moveConstruct(T& member, T&& val)
-    {
-        new (&member) T(std::move(val));
-    }
-
-    void Move(LOTVariant&& other)
-    {
-        switch (other.mTag) {
-        case Type::Value:
-            moveConstruct(impl.valueFunc, std::move(other.impl.valueFunc));
-            break;
-        case Type::Color:
-            moveConstruct(impl.colorFunc, std::move(other.impl.colorFunc));
-            break;
-        case Type::Point:
-            moveConstruct(impl.pointFunc, std::move(other.impl.pointFunc));
-            break;
-        case Type::Size:
-            moveConstruct(impl.sizeFunc, std::move(other.impl.sizeFunc));
-            break;
-        default:
-            break;
-        }
-        mTag = other.mTag;
-        mPropery = other.mPropery;
-        other.mTag = MonoState;
-    }
-
-    void Copy(const LOTVariant& other)
-    {
-        switch (other.mTag) {
-        case Type::Value:
-            construct(impl.valueFunc, other.impl.valueFunc);
-            break;
-        case Type::Color:
-            construct(impl.colorFunc, other.impl.colorFunc);
-            break;
-        case Type::Point:
-            construct(impl.pointFunc, other.impl.pointFunc);
-            break;
-        case Type::Size:
-            construct(impl.sizeFunc, other.impl.sizeFunc);
-            break;
-        default:
-            break;
-        }
-        mTag = other.mTag;
-        mPropery = other.mPropery;
-    }
-
-    void Destroy()
-    {
-        switch (mTag) {
-        case MonoState: {
-            break;
-        }
-        case Value: {
-            impl.valueFunc.~ValueFunc();
-            break;
-        }
-        case Color: {
-            impl.colorFunc.~ColorFunc();
-            break;
-        }
-        case Point: {
-            impl.pointFunc.~PointFunc();
-            break;
-        }
-        case Size: {
-            impl.sizeFunc.~SizeFunc();
-            break;
-        }
-        }
-    }
-
-    enum Type { MonoState, Value, Color, Point, Size };
-    rlottie::Property mPropery;
-    Type              mTag{MonoState};
-    union details {
-        ColorFunc colorFunc;
-        ValueFunc valueFunc;
-        PointFunc pointFunc;
-        SizeFunc  sizeFunc;
-        details() {}
-        ~details() noexcept {}
-    } impl;
+    rlottie::Property mPropery{};
+    std::variant<std::monostate, ValueFunc, ColorFunc, PointFunc, SizeFunc>
+        mImpl;
 };
 
 namespace rlottie {

@@ -34,3 +34,24 @@ animation_testsuite = executable('animationTestSuite',
                               )
 
 test('Animation Testsuite', animation_testsuite)
+
+
+# Unit tests for the internal model types. These need the private headers but
+# no resource files, so they run anywhere.
+model_test_sources = [
+    'testsuite.cpp',
+    'test_lottiemodel.cpp',
+    'test_lottiefiltermodel.cpp'
+    ]
+
+model_testsuite = executable('modelTestSuite',
+                              model_test_sources,
+                              include_directories : inc + [
+                                  include_directories('../src/lottie'),
+                                  include_directories('../src/vector')],
+                              override_options : override_default,
+                              link_with : rlottie_lib,
+                              dependencies : gtest_dep,
+                              )
+
+test('Model Testsuite', model_testsuite)

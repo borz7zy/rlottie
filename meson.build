@@ -1,6 +1,6 @@
 project('rlottie',
         'cpp',
-        default_options : ['cpp_std=c++14', 'optimization=s'],
+        default_options : ['cpp_std=c++17', 'optimization=s'],
         version : '0.2',
         license : 'MIT',
         meson_version : '>=0.49',
