@@ -477,15 +477,28 @@ public:
     Object::Type type() const { return mData._type; }
     void         setName(const char *name)
     {
-        if (name) {
-            auto len = strlen(name);
-            if (len < maxShortStringLength) {
-                setShortString(true);
-                strncpy(mData._buffer, name, len + 1);
-            } else {
-                setShortString(false);
-                mPtr = strdup(name);
-            }
+        if (!name) return;
+
+        /* setName() may be called more than once for the same object (a lottie
+         * file is free to repeat the "nm" key), so release any previous
+         * allocation before mPtr is overwritten through the union. */
+        if (!shortString() && mPtr) {
+            free(mPtr);
+            mPtr = nullptr;
+        }
+
+        auto len = strlen(name);
+        if (len < maxShortStringLength) {
+            /* len + 1 <= maxShortStringLength == sizeof(mData._buffer), so the
+             * terminator is copied and always fits. */
+            setShortString(true);
+            memcpy(mData._buffer, name, len + 1);
+        } else if (char *copy = strdup(name)) {
+            setShortString(false);
+            mPtr = copy;
+        } else {
+            setShortString(true);
+            mData._buffer[0] = '\0';
         }
     }
     const char *name() const { return shortString() ? mData._buffer : mPtr; }
